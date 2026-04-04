@@ -254,8 +254,10 @@ const App = () => {
     ? rawLastUpdated 
     : (isTagalog ? 'Naghihintay ng koneksyon...' : 'Waiting for connection...');
 
+  // Session Check on Load
   useEffect(() => {
-    const sessionUser = sessionStorage.getItem('aqualiv_session');
+    // CHANGED: sessionStorage to localStorage
+    const sessionUser = localStorage.getItem('aqualiv_session'); 
     if (sessionUser) {
       setActiveUser(sessionUser);
       setIsAuthenticated(true);
@@ -263,13 +265,15 @@ const App = () => {
   }, []);
 
   const handleLoginSuccess = (username) => {
-    sessionStorage.setItem('aqualiv_session', username);
+    // CHANGED: sessionStorage to localStorage
+    localStorage.setItem('aqualiv_session', username); 
     setActiveUser(username);
     setIsAuthenticated(true);
   };
 
   const handleLogout = () => {
-    sessionStorage.removeItem('aqualiv_session');
+    // CHANGED: sessionStorage to localStorage
+    localStorage.removeItem('aqualiv_session'); 
     setActiveUser(null);
     setIsAuthenticated(false);
     
@@ -870,7 +874,7 @@ const App = () => {
                             <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">SMS Notifications</h3>
                             {smsEnabled && (
                               <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-[10px] font-bold uppercase rounded-md tracking-wider shadow-sm">
-                                4G Module Enabled
+                                SIM Module Enabled
                               </span>
                             )}
                           </div>
@@ -909,7 +913,7 @@ const App = () => {
                           <input 
                             type="tel" 
                             maxLength="10"
-                            placeholder="9171234567"
+                            placeholder="Enter 10-digit number"
                             value={phoneNumber}
                             onChange={(e) => {
                               const val = e.target.value.replace(/\D/g, ''); 
