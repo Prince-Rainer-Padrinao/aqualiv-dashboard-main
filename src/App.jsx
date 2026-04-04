@@ -617,7 +617,7 @@ const App = () => {
               </div>
               <button 
                 onClick={() => setIsDarkMode(!isDarkMode)}
-                className={`w-10 h-6 rounded-full relative transition-colors duration-300 focus:outline-none ${isDarkMode ? 'bg-indigo-500' : 'bg-slate-200 dark:bg-slate-700'}`}
+                className={`w-10 h-6 rounded-full relative transition-colors duration-300 focus:outline-none ${isDarkMode ? 'bg-sky-500' : 'bg-slate-200 dark:bg-slate-700'}`}
               >
                 <div className={`w-4 h-4 bg-white rounded-full absolute top-1 transition-transform duration-300 ${isDarkMode ? 'translate-x-5' : 'translate-x-1'}`}></div>
               </button>
