@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "885566839580",
+    "project_id": "aqualiv-3ea76",
+    "storage_bucket": "aqualiv-3ea76.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:885566839580:android:4377b90f2d8bfb7399f8d9",
+        "android_client_info": {
+          "package_name": "com.aqualiv.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDeFlCwcC3MpWzHaLrS_gXyM0Mvbw8l6oY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

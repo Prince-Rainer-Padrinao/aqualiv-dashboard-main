@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { PushNotifications } from '@capacitor/push-notifications';
 import { 
   Activity, 
   Bell, 
@@ -254,6 +255,50 @@ const App = () => {
     ? rawLastUpdated 
     : (isTagalog ? 'Naghihintay ng koneksyon...' : 'Waiting for connection...');
 
+
+
+// Inside your App component:
+useEffect(() => {
+  // 1. Request permission from the user
+  PushNotifications.requestPermissions().then(result => {
+    if (result.receive === 'granted') {
+      // 2. Register with Apple/Google to get a token
+      PushNotifications.register();
+    }
+  });
+
+  // 3. What to do when we get the Token
+  PushNotifications.addListener('registration', async (token) => {
+    console.log('Push registration success, token: ' + token.value);
+    
+    // Check who is currently logged in (using the localStorage we fixed earlier!)
+    const sessionUser = localStorage.getItem('aqualiv_session');
+    
+    if (sessionUser) {
+      // Send the token to Supabase
+      const { error } = await supabase
+        .from('profiles')
+        .update({ fcm_token: token.value })
+        .eq('username', sessionUser); // Ensure it saves to the correct fisher's profile
+
+      if (error) {
+        console.error('Error saving token to Supabase:', error);
+      } else {
+        console.log('Token successfully saved to database!');
+      }
+    }
+  });
+
+  // 4. What to do if registration fails
+  PushNotifications.addListener('registrationError', (error) => {
+    console.error('Error on registration: ' + JSON.stringify(error));
+  });
+
+  // 5. What to do when a notification is received while the app is OPEN
+  PushNotifications.addListener('pushNotificationReceived', (notification) => {
+    console.log('Push received: ' + JSON.stringify(notification));
+  });
+}, []);
   // Session Check on Load
   useEffect(() => {
     // CHANGED: sessionStorage to localStorage
