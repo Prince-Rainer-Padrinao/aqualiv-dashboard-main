@@ -25,9 +25,18 @@ if (!admin.apps.length) {
 
 const THIRTY_MINUTES = 30 * 60 * 1000;
 
-function getStatus(salinity: number, temp: number): string {
-  if (salinity > 15000 || temp > 32) return "RED";
-  if (salinity > 10000 || temp > 30) return "ORANGE";
+function getStatus(salinity: number, temp: number, ph: number): string {
+  // 1. RED CRITICAL (Matches Website)
+  if (salinity > 10000 || temp > 35 || ph < 5.5 || ph > 9.0) {
+    return "RED";
+  }
+  
+  // 2. ORANGE WARNING (Matches Website)
+  if ((salinity > 2000 && salinity <= 10000) || temp > 32 || ph < 6.5 || ph > 8.5) {
+    return "ORANGE";
+  }
+  
+  // 3. GREEN STABLE
   return "GREEN";
 }
 
@@ -48,8 +57,9 @@ serve(async (req: Request) => {
   const currentReading = readings[0];
   const previousReading = readings[1];
 
-  const currentStatus = getStatus(currentReading.salinity, currentReading.temperature);
-  const previousStatus = getStatus(previousReading.salinity, previousReading.temperature);
+  // Update these lines inside the serve function
+  const currentStatus = getStatus(currentReading.salinity, currentReading.temperature, currentReading.ph);
+  const previousStatus = getStatus(previousReading.salinity, previousReading.temperature, previousReading.ph);
 
   console.log(`Previous: ${previousStatus} | Current: ${currentStatus}`);
 
