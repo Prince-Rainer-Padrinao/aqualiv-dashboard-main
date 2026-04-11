@@ -256,49 +256,62 @@ const App = () => {
     : (isTagalog ? 'Naghihintay ng koneksyon...' : 'Waiting for connection...');
 
 
-
+// ========================================
 // Inside your App component:
-useEffect(() => {
-  // 1. Request permission from the user
-  PushNotifications.requestPermissions().then(result => {
-    if (result.receive === 'granted') {
-      // 2. Register with Apple/Google to get a token
-      PushNotifications.register();
-    }
-  });
+// --- AUTOMATED PUSH NOTIFICATION SETUP ---
 
-  // 3. What to do when we get the Token
-  PushNotifications.addListener('registration', async (token) => {
-    console.log('Push registration success, token: ' + token.value);
-    
-    // Check who is currently logged in (using the localStorage we fixed earlier!)
-    const sessionUser = localStorage.getItem('aqualiv_session');
-    
-    if (sessionUser) {
-      // Send the token to Supabase
-      const { error } = await supabase
-        .from('profiles')
-        .update({ fcm_token: token.value })
-        .eq('username', sessionUser); // Ensure it saves to the correct fisher's profile
-
-      if (error) {
-        console.error('Error saving token to Supabase:', error);
-      } else {
-        console.log('Token successfully saved to database!');
+  // 1. THE TRAP: Listen for Google to hand us the token
+  useEffect(() => {
+    PushNotifications.addListener('registration', async (token) => {
+      console.log('Google gave this token: ', token.value);
+      
+      const sessionUser = localStorage.getItem('aqualiv_session');
+      if (sessionUser) {
+        // Silently save it to their specific row in Supabase
+        const { error } = await supabase
+          .from('profiles')
+          .update({ fcm_token: token.value })
+          .eq('username', sessionUser);
+          
+        if (!error) console.log('Token synced to Supabase instantly!');
       }
+    });
+
+    PushNotifications.addListener('registrationError', (error) => {
+      console.error('Error on registration: ', error);
+    });
+
+    PushNotifications.addListener('pushNotificationReceived', (notification) => {
+      console.log('Push received in foreground: ', notification);
+    });
+
+    return () => {
+      PushNotifications.removeAllListeners();
+    };
+  }, []);
+
+  // 2. THE TRIGGER: Automatically ask for token the second they are logged in
+  useEffect(() => {
+    if (isAuthenticated && activeUser) {
+      const autoGrabToken = async () => {
+        let permStatus = await PushNotifications.checkPermissions();
+        
+        // Android 13+ requires a prompt, Android 12 and below will just skip this
+        if (permStatus.receive === 'prompt') {
+          permStatus = await PushNotifications.requestPermissions();
+        }
+        
+        // If allowed (or auto-allowed by Android), grab the token from Google
+        if (permStatus.receive === 'granted') {
+          await PushNotifications.register(); 
+        }
+      };
+      autoGrabToken();
     }
-  });
+  }, [isAuthenticated, activeUser]);
 
-  // 4. What to do if registration fails
-  PushNotifications.addListener('registrationError', (error) => {
-    console.error('Error on registration: ' + JSON.stringify(error));
-  });
+// ========================================
 
-  // 5. What to do when a notification is received while the app is OPEN
-  PushNotifications.addListener('pushNotificationReceived', (notification) => {
-    console.log('Push received: ' + JSON.stringify(notification));
-  });
-}, []);
   // Session Check on Load
   useEffect(() => {
     // CHANGED: sessionStorage to localStorage

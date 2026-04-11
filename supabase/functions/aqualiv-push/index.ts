@@ -2,7 +2,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 import admin from "npm:firebase-admin@11.11.0";
 
-// 1. REPLACE THIS BLOCK WITH YOUR ACTUAL FIREBASE JSON
+// 1. FIREBASE SETUP: Replace the details below with your actual Firebase JSON
 const serviceAccount = {
   "type": "service_account",
   "project_id": "aqualiv-3ea76",
@@ -58,7 +58,6 @@ serve(async (req: Request) => {
   if (currentStatus !== previousStatus) {
     const now = new Date();
 
-    // Grab both SMS and Push Notification data
     const { data: profiles } = await supabase
       .from('profiles')
       .select('id, phone_number, fcm_token, sms_enabled, last_sms_at');
@@ -73,7 +72,7 @@ serve(async (req: Request) => {
 
       if (eligibleProfiles.length > 0) {
         
-        // --- SECTION A: PUSH NOTIFICATIONS ---
+        // --- PUSH NOTIFICATIONS ---
         const pushTokens = eligibleProfiles.map(p => p.fcm_token).filter(Boolean);
         
         if (pushTokens.length > 0) {
@@ -92,7 +91,7 @@ serve(async (req: Request) => {
           }
         }
 
-        // --- SECTION B: SMS BLAST ---
+        // --- SMS BLAST ---
         const smsProfiles = eligibleProfiles.filter(p => p.sms_enabled && p.phone_number);
         const phoneNumbers = smsProfiles.map(p => {
           let num = String(p.phone_number).trim();
@@ -126,7 +125,7 @@ serve(async (req: Request) => {
           }
         }
 
-        // --- SECTION C: UPDATE COOLDOWN TIMER ---
+        // --- UPDATE COOLDOWN TIMER ---
         const userIds = eligibleProfiles.map(p => p.id);
         await supabase
           .from('profiles')
@@ -137,6 +136,8 @@ serve(async (req: Request) => {
         console.log("Status changed, but 30-minute cooldown is active.");
       }
     }
+  } else {
+    console.log("Status is exactly the same. Doing nothing.");
   }
 
   return new Response("Success", { status: 200 });
