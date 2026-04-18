@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { PushNotifications } from '@capacitor/push-notifications';
 import { 
   Activity, 
   Bell, 
@@ -9,7 +8,6 @@ import {
   Menu,
   AlertTriangle,
   MessageSquare,
-  Smartphone,
   Check,
   Save,
   Phone,
@@ -19,7 +17,8 @@ import {
   LogOut,
   Clock,
   Moon,
-  Globe
+  Globe,
+  Info
 } from 'lucide-react';
 
 import { 
@@ -53,7 +52,6 @@ const LoginScreen = ({ onLogin }) => {
     e.preventDefault();
     setError('');
 
-    // Block empty submissions
     if (!username.trim() || !password.trim()) {
       setError('Please enter both username and password.');
       return;
@@ -222,13 +220,23 @@ const App = () => {
   const [isTagalog, setIsTagalog] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
 
+  // Card Flip States
+  const [flipped, setFlipped] = useState({ salinity: false, temp: false, ph: false });
+
+  const toggleFlip = (card) => {
+    setFlipped(prev => ({ ...prev, [card]: !prev[card] }));
+  };
+
   // Heartbeat State
   const [isSystemOnline, setIsSystemOnline] = useState(false);
   const [lastReadingTime, setLastReadingTime] = useState(null);
 
+  // Water Leak State
+  const [hasWaterLeak, setHasWaterLeak] = useState(false);
+  const [showLeakModal, setShowLeakModal] = useState(false);
+
   // Database-Synced Alert States
   const [smsEnabled, setSmsEnabled] = useState(false); 
-  const [pushEnabled, setPushEnabled] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
   const [isRegistered, setIsRegistered] = useState(false);
 
@@ -244,7 +252,7 @@ const App = () => {
   const [rawPhHistoryData, setRawPhHistoryData] = useState([]);
   const [rawLastUpdated, setRawLastUpdated] = useState('');
 
-  // DISPLAY Sensor Data (Zeroed out if offline)
+  // DISPLAY Sensor Data
   const displaySalinity = isSystemOnline ? rawSalinity : 0;
   const displayTemperature = isSystemOnline ? rawTemperature : 0;
   const displayPh = isSystemOnline ? rawPh : 0;
@@ -256,65 +264,8 @@ const App = () => {
     : (isTagalog ? 'Naghihintay ng koneksyon...' : 'Waiting for connection...');
 
 
-// ========================================
-// Inside your App component:
-// --- AUTOMATED PUSH NOTIFICATION SETUP ---
-
-  // 1. THE TRAP: Listen for Google to hand us the token
-  useEffect(() => {
-    PushNotifications.addListener('registration', async (token) => {
-      console.log('Google gave this token: ', token.value);
-      
-      const sessionUser = localStorage.getItem('aqualiv_session');
-      if (sessionUser) {
-        // Silently save it to their specific row in Supabase
-        const { error } = await supabase
-          .from('profiles')
-          .update({ fcm_token: token.value })
-          .eq('username', sessionUser);
-          
-        if (!error) console.log('Token synced to Supabase instantly!');
-      }
-    });
-
-    PushNotifications.addListener('registrationError', (error) => {
-      console.error('Error on registration: ', error);
-    });
-
-    PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      console.log('Push received in foreground: ', notification);
-    });
-
-    return () => {
-      PushNotifications.removeAllListeners();
-    };
-  }, []);
-
-  // 2. THE TRIGGER: Automatically ask for token the second they are logged in
-  useEffect(() => {
-    if (isAuthenticated && activeUser) {
-      const autoGrabToken = async () => {
-        let permStatus = await PushNotifications.checkPermissions();
-        
-        // Android 13+ requires a prompt, Android 12 and below will just skip this
-        if (permStatus.receive === 'prompt') {
-          permStatus = await PushNotifications.requestPermissions();
-        }
-        
-        // If allowed (or auto-allowed by Android), grab the token from Google
-        if (permStatus.receive === 'granted') {
-          await PushNotifications.register(); 
-        }
-      };
-      autoGrabToken();
-    }
-  }, [isAuthenticated, activeUser]);
-
-// ========================================
-
   // Session Check on Load
   useEffect(() => {
-    // CHANGED: sessionStorage to localStorage
     const sessionUser = localStorage.getItem('aqualiv_session'); 
     if (sessionUser) {
       setActiveUser(sessionUser);
@@ -323,31 +274,26 @@ const App = () => {
   }, []);
 
   const handleLoginSuccess = (username) => {
-    // CHANGED: sessionStorage to localStorage
     localStorage.setItem('aqualiv_session', username); 
     setActiveUser(username);
     setIsAuthenticated(true);
   };
 
   const handleLogout = () => {
-    // CHANGED: sessionStorage to localStorage
     localStorage.removeItem('aqualiv_session'); 
     setActiveUser(null);
     setIsAuthenticated(false);
-    
     setSmsEnabled(false);
-    setPushEnabled(false);
     setPhoneNumber('');
     setIsRegistered(false);
   };
 
-  // Fetch User Settings
   useEffect(() => {
     if (isAuthenticated && activeUser) {
       const fetchUserSettings = async () => {
         const { data, error } = await supabase
           .from('profiles')
-          .select('phone_number, sms_enabled, push_enabled')
+          .select('phone_number, sms_enabled')
           .eq('username', activeUser)
           .single();
 
@@ -357,7 +303,6 @@ const App = () => {
             setIsRegistered(true);
           }
           setSmsEnabled(data.sms_enabled || false);
-          setPushEnabled(data.push_enabled || false);
         }
       };
       fetchUserSettings();
@@ -384,16 +329,6 @@ const App = () => {
     await supabase
       .from('profiles')
       .update({ sms_enabled: newState })
-      .eq('username', activeUser);
-  };
-
-  const handlePushToggle = async () => {
-    const newState = !pushEnabled;
-    setPushEnabled(newState);
-
-    await supabase
-      .from('profiles')
-      .update({ push_enabled: newState })
       .eq('username', activeUser);
   };
 
@@ -437,7 +372,6 @@ const App = () => {
 
     if (sal > 10000 || temp > 35 || ph < 5.5 || ph > 9.0) {
       return {
-        // title: tagalog ? 'Kritikal na Kondisyon' : 'Extreme Condition',
         message: tagalog ? 'MATAAS NA ANTAS NG ALAT' : 'Extreme Condition',
         sub: tagalog
           ? "Babala: Pagpasok ng tubig-alat (Mataas na panganib ng Fish Kill o Fish Migration)."
@@ -447,11 +381,9 @@ const App = () => {
       };
     }
 
-    if (sal > 2000 && sal <= 10000 || temp > 32 || ph < 6.5 || ph > 8.5) {
+    if ((sal > 2000 && sal <= 10000) || temp > 32 || ph < 6.5 || ph > 8.5) {
       return {
-        // title: tagalog ? 'Hindi Stable ang Tubig' : 'Brackish Water Condition',
         message: tagalog ? 'Konting Alat' : 'Brackish Water Condition',
-        // message: tagalog ? 'MAY BAHAGYANG ALAT' : 'MODERATE SALT',
         sub: tagalog
           ? "Mataas na posibilidad na may ganitong isda: Bangus, Apahap, Kanduli, Hipon, Sugpo, at Talangka."
           : "Possibly Available Fishes: Bangus, Apahap, Kanduli, Hipon, Sugpo, Talangka",
@@ -479,7 +411,7 @@ const App = () => {
     const fetchLatestData = async () => {
       const { data, error } = await supabase
         .from('readings')
-        .select('temperature, salinity, ph, created_at') 
+        .select('temperature, salinity, ph, water_leak, created_at') 
         .order('created_at', { ascending: false })
         .limit(7);
 
@@ -489,6 +421,15 @@ const App = () => {
         if (latest.salinity !== null) setRawSalinity(latest.salinity);
         if (latest.ph !== null) setRawPh(latest.ph);
         
+        // WATER LEAK LOGIC
+        if (latest.water_leak === true && !hasWaterLeak) {
+          setHasWaterLeak(true);
+          setShowLeakModal(true);
+        } else if (latest.water_leak === false && hasWaterLeak) {
+          setHasWaterLeak(false); 
+          setShowLeakModal(false); 
+        }
+
         setLastReadingTime(new Date(latest.created_at).getTime());
 
         const timeString = new Date(latest.created_at).toLocaleTimeString([], {
@@ -514,9 +455,8 @@ const App = () => {
     fetchLatestData(); 
     const fetchInterval = setInterval(fetchLatestData, 10000);
     return () => clearInterval(fetchInterval);
-  }, [isAuthenticated]);
+  }, [isAuthenticated, hasWaterLeak]);
 
-  // HEARTBEAT CHECKER
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -570,6 +510,45 @@ const App = () => {
                 className="w-full py-3.5 bg-sky-500 text-white rounded-xl font-bold text-sm hover:bg-slate-800 dark:hover:bg-slate-700 transition-all active:scale-95 shadow-lg shadow-slate-200 dark:shadow-none mt-2"
               >
                 Okay
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CRITICAL WATER LEAK MODAL */}
+      {showLeakModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
+          <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl p-8 max-w-md w-full border-2 border-red-500 relative transform transition-all scale-100 animate-in zoom-in-95">
+            
+            <button
+              onClick={() => setShowLeakModal(false)}
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-red-500 bg-slate-100 dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-full transition-colors"
+            >
+              <XCircle size={24} />
+            </button>
+
+            <div className="flex flex-col items-center text-center gap-4 mt-4">
+              <div className="p-5 rounded-full bg-red-100 dark:bg-red-500/20 text-red-600 dark:text-red-400 animate-pulse">
+                <AlertTriangle size={48} strokeWidth={2} />
+              </div>
+              
+              <div className="space-y-2">
+                <h2 className="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tight">
+                  {isTagalog ? "BABALA: MAY TUBIG SA LOOB!" : "WARNING: WATER LEAK!"}
+                </h2>
+                <p className="text-slate-600 dark:text-slate-400 font-medium leading-relaxed">
+                  {isTagalog 
+                    ? "Naka-detect ng tubig sa loob ng enclosure ng device. Mangyaring suriin agad ito upang maiwasan ang pagkasira ng hardware."
+                    : "Water has been detected inside the device enclosure. Please retrieve and inspect it immediately to prevent hardware damage."}
+                </p>
+              </div>
+
+              <button 
+                onClick={() => setShowLeakModal(false)}
+                className="w-full mt-4 py-4 bg-red-500 text-white rounded-xl font-bold text-base hover:bg-red-600 transition-all active:scale-95 shadow-lg shadow-red-200 dark:shadow-none"
+              >
+                {isTagalog ? "Naunawaan Ko" : "I Understand"}
               </button>
             </div>
           </div>
@@ -766,142 +745,219 @@ const App = () => {
 
                   <div className="lg:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-6">
                     
-                    {/* SALINITY CARD */}
-                    <div className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800/50 rounded-[2rem] p-6 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col justify-between group hover:shadow-xl hover:shadow-blue-500/10 transition-all duration-300 relative overflow-hidden">
-                      <div className="absolute top-0 right-0 w-32 h-32 bg-sky-100 dark:bg-sky-500/10 rounded-full blur-3xl -mr-16 -mt-16 opacity-50 group-hover:opacity-100 transition-opacity"></div>
-                      <div className="flex justify-between items-start relative z-10">
-                        <div>
-                          <p className="text-slate-500 dark:text-slate-400 font-semibold text-xs uppercase tracking-wider">Salt Content (TDS)</p>
-                          <div className="flex items-baseline mt-2">
-                            <h3 className={`text-5xl font-black tracking-tight ${!isSystemOnline ? 'text-slate-300 dark:text-slate-600' : 'text-slate-800 dark:text-slate-100'}`}>
-                              {displaySalinity.toFixed(1)}
-                            </h3>
-                            <span className="text-lg text-slate-400 font-semibold ml-1">ppm</span>
+                    {/* --- SALINITY CARD (FLIP OVER) --- */}
+                    {/* FIXED: Changed to strict h-[320px] */}
+                    <div className="relative h-[320px] w-full perspective-1000 group">
+                      <div className={`relative w-full h-full transition-transform duration-700 transform-style-3d ${flipped.salinity ? 'rotate-y-180' : ''}`}>
+                        
+                        {/* FRONT FACE */}
+                        <div className="absolute inset-0 backface-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800/50 rounded-[2rem] p-6 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col justify-between hover:shadow-xl hover:shadow-blue-500/10 transition-all overflow-hidden">
+                          <div className="absolute top-0 right-0 w-32 h-32 bg-sky-100 dark:bg-sky-500/10 rounded-full blur-3xl -mr-16 -mt-16 opacity-50 transition-opacity"></div>
+                          
+                          {/* Info Button Overlay */}
+                          <button onClick={() => toggleFlip('salinity')} className="absolute top-4 right-4 z-20 p-2 text-slate-400 hover:text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-500/10 rounded-full transition-colors">
+                            <Info size={20} />
+                          </button>
+
+                          <div className="flex justify-between items-start relative z-10 mt-2 pr-8">
+                            <div>
+                              <p className="text-slate-500 dark:text-slate-400 font-semibold text-xs uppercase tracking-wider">Salt Content (TDS)</p>
+                              <div className="flex items-baseline mt-2">
+                                <h3 className={`text-5xl font-black tracking-tight ${!isSystemOnline ? 'text-slate-300 dark:text-slate-600' : 'text-slate-800 dark:text-slate-100'}`}>
+                                  {displaySalinity.toFixed(1)}
+                                </h3>
+                                <span className="text-lg text-slate-400 font-semibold ml-1">ppm</span>
+                              </div>
+                              <div className="flex items-center gap-1 mt-1 text-slate-400">
+                                <Clock size={12} />
+                                <span className="text-xs font-medium">{displayLastUpdated}</span>
+                              </div>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-1 mt-1 text-slate-400">
-                            <Clock size={12} />
-                            <span className="text-xs font-medium">{displayLastUpdated}</span>
+                          
+                          <div className="mt-6 relative z-10 flex flex-col h-full justify-end">
+                            <div className="flex justify-between text-xs font-semibold text-slate-400 dark:text-slate-500 mb-2">
+                               <span>0</span>
+                               <span>10k+</span>
+                            </div>
+                            <div className="h-14 w-full relative z-10">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <AreaChart data={displayHistoryData.slice(-5)}>
+                                  <defs>
+                                    <linearGradient id="colorSalinity" x1="0" y1="0" x2="0" y2="1">
+                                      <stop offset="5%" stopColor={!isSystemOnline ? '#cbd5e1' : '#0ea5e9'} stopOpacity={0.4}/>
+                                      <stop offset="95%" stopColor={!isSystemOnline ? '#cbd5e1' : '#0ea5e9'} stopOpacity={0}/>
+                                    </linearGradient>
+                                  </defs>
+                                  <Area type="monotone" dataKey="value" stroke={!isSystemOnline ? '#cbd5e1' : '#0ea5e9'} strokeWidth={4} fill="url(#colorSalinity)" />
+                                </AreaChart>
+                              </ResponsiveContainer>
+                            </div>
                           </div>
                         </div>
-                        <div className={`p-3 bg-white dark:bg-slate-800 shadow-sm rounded-2xl group-hover:scale-110 transition-transform duration-300 ${!isSystemOnline ? 'text-slate-300 dark:text-slate-600' : 'text-sky-500'}`}>
-                          <Droplets size={28} />
+
+                        {/* BACK FACE */}
+                        <div className="absolute inset-0 backface-hidden rotate-y-180 bg-sky-500 rounded-[2rem] p-6 sm:p-8 shadow-xl text-white flex flex-col justify-center items-center text-center overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
+                          <button onClick={() => toggleFlip('salinity')} className="absolute top-4 right-4 z-20 p-2 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition-colors">
+                            <Info size={20} />
+                          </button>
+                          <Droplets size={32} className="mb-4 opacity-80 shrink-0" />
+                          <h3 className="font-bold text-lg mb-2 shrink-0">{isTagalog ? "Alam mo ba?" : "Did you know?"}</h3>
+                          <p className="text-sm md:text-base font-medium leading-relaxed opacity-90">
+                            {isTagalog 
+                              ? "Hindi umiinom ng tubig ang isdang tabang—kusa itong pumapasok sa katawan nila! Kung biglang umalat ang tubig (lagpas 2,000 ppm), hinihigop ng alat ang tubig palabas sa katawan nila."
+                              : "Freshwater fish don't actually drink water—their bodies constantly absorb it like a sponge! If the water gets too salty (above 2,000 ppm), the salt acts like a vacuum and literally pulls the water out of their body."}
+                          </p>
                         </div>
-                      </div>
-                      <div className="mt-6 relative z-10 flex flex-col h-full justify-end">
-                        <div className="flex justify-between text-xs font-semibold text-slate-400 dark:text-slate-500 mb-2">
-                           <span>0</span>
-                           {/* <span className="text-slate-800 dark:text-slate-300">Ideal: &lt; 2000 ppm</span> */}
-                           <span>10k+</span>
-                        </div>
-                        <div className="h-14 w-full relative z-10">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={displayHistoryData.slice(-5)}>
-                              <defs>
-                                <linearGradient id="colorSalinity" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor={!isSystemOnline ? '#cbd5e1' : '#0ea5e9'} stopOpacity={0.4}/>
-                                  <stop offset="95%" stopColor={!isSystemOnline ? '#cbd5e1' : '#0ea5e9'} stopOpacity={0}/>
-                                </linearGradient>
-                              </defs>
-                              <Area type="monotone" dataKey="value" stroke={!isSystemOnline ? '#cbd5e1' : '#0ea5e9'} strokeWidth={4} fill="url(#colorSalinity)" />
-                            </AreaChart>
-                          </ResponsiveContainer>
-                        </div>
+
                       </div>
                     </div>
 
-                    {/* TEMPERATURE CARD */}
-                    <div className="bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800/50 rounded-[2rem] p-6 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col justify-between group hover:shadow-xl hover:shadow-rose-500/10 transition-all duration-300 relative overflow-hidden">
-                       <div className="absolute top-0 right-0 w-32 h-32 bg-rose-100 dark:bg-rose-500/10 rounded-full blur-3xl -mr-16 -mt-16 opacity-50 group-hover:opacity-100 transition-opacity"></div>
-                      <div className="flex justify-between items-start relative z-10">
-                        <div>
-                          <p className="text-slate-500 dark:text-slate-400 font-semibold text-xs uppercase tracking-wider">Water Temperature</p>
-                          <div className="flex items-baseline mt-2">
-                            <h3 className={`text-5xl font-black tracking-tight ${!isSystemOnline ? 'text-slate-300 dark:text-slate-600' : 'text-slate-800 dark:text-slate-100'}`}>
-                              {displayTemperature.toFixed(2)}
-                            </h3>
-                            <span className="text-lg text-slate-400 font-semibold ml-1">°C</span>
+                    {/* --- TEMPERATURE CARD (FLIP OVER) --- */}
+                    {/* FIXED: Changed to strict h-[320px] */}
+                    <div className="relative h-[320px] w-full perspective-1000 group">
+                      <div className={`relative w-full h-full transition-transform duration-700 transform-style-3d ${flipped.temp ? 'rotate-y-180' : ''}`}>
+                        
+                        {/* FRONT FACE */}
+                        <div className="absolute inset-0 backface-hidden bg-gradient-to-br from-white to-slate-50 dark:from-slate-900 dark:to-slate-800/50 rounded-[2rem] p-6 shadow-sm border border-slate-100 dark:border-slate-800 flex flex-col justify-between hover:shadow-xl hover:shadow-rose-500/10 transition-all overflow-hidden">
+                           <div className="absolute top-0 right-0 w-32 h-32 bg-rose-100 dark:bg-rose-500/10 rounded-full blur-3xl -mr-16 -mt-16 opacity-50 transition-opacity"></div>
+                           
+                           {/* Info Button Overlay */}
+                           <button onClick={() => toggleFlip('temp')} className="absolute top-4 right-4 z-20 p-2 text-slate-400 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-full transition-colors">
+                            <Info size={20} />
+                          </button>
+
+                          <div className="flex justify-between items-start relative z-10 mt-2 pr-8">
+                            <div>
+                              <p className="text-slate-500 dark:text-slate-400 font-semibold text-xs uppercase tracking-wider">Water Temperature</p>
+                              <div className="flex items-baseline mt-2">
+                                <h3 className={`text-5xl font-black tracking-tight ${!isSystemOnline ? 'text-slate-300 dark:text-slate-600' : 'text-slate-800 dark:text-slate-100'}`}>
+                                  {displayTemperature.toFixed(2)}
+                                </h3>
+                                <span className="text-lg text-slate-400 font-semibold ml-1">°C</span>
+                              </div>
+                               <div className="flex items-center gap-1 mt-1 text-slate-400">
+                                <Clock size={12} />
+                                <span className="text-xs font-medium">{displayLastUpdated}</span>
+                              </div>
+                            </div>
                           </div>
-                           <div className="flex items-center gap-1 mt-1 text-slate-400">
-                            <Clock size={12} />
-                            <span className="text-xs font-medium">{displayLastUpdated}</span>
+
+                          <div className="mt-6 relative z-10 mb-4">
+                             <div className="flex justify-between text-xs font-semibold text-slate-400 dark:text-slate-500 mb-2">
+                                <span>0°C</span>
+                                <span className="text-slate-800 dark:text-slate-300">Ideal: 26-32°C</span>
+                                <span>40°C</span>
+                             </div>
+                             <div className="w-full bg-slate-200/50 dark:bg-slate-800 h-3 rounded-full overflow-hidden shadow-inner">
+                                <div className={`h-full rounded-full shadow-sm transition-all duration-1000 ease-out ${!isSystemOnline ? 'bg-slate-300 dark:bg-slate-600' : 'bg-gradient-to-r from-orange-400 to-rose-500'}`} style={{ width: `${(displayTemperature / 40) * 100}%` }}></div>
+                             </div>
                           </div>
                         </div>
-                        <div className={`p-3 bg-white dark:bg-slate-800 shadow-sm rounded-2xl group-hover:scale-110 transition-transform duration-300 ${!isSystemOnline ? 'text-slate-300 dark:text-slate-600' : 'text-rose-500'}`}>
-                          <Thermometer size={28} />
+
+                        {/* BACK FACE */}
+                        <div className="absolute inset-0 backface-hidden rotate-y-180 bg-rose-500 rounded-[2rem] p-6 sm:p-8 shadow-xl text-white flex flex-col justify-center items-center text-center overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
+                          <button onClick={() => toggleFlip('temp')} className="absolute top-4 right-4 z-20 p-2 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition-colors">
+                            <Info size={20} />
+                          </button>
+                          <Thermometer size={32} className="mb-4 opacity-80 shrink-0" />
+                          <h3 className="font-bold text-lg mb-2 shrink-0">{isTagalog ? "Alam mo ba?" : "Did you know?"}</h3>
+                          <p className="text-sm md:text-base font-medium leading-relaxed opacity-90">
+                            {isTagalog 
+                              ? "Cold-blooded ang mga isda, kaya sumusunod ang init nila sa tubig! Kapag sobrang init (lagpas 32°C), nawawalan ng oxygen ang tubig."
+                              : "Fish are cold-blooded, so they can't sweat or cool themselves down! When water gets too hot (above 32°C), it actually loses its dissolved oxygen."}
+                          </p>
                         </div>
-                      </div>
-                      <div className="mt-6 relative z-10">
-                         <div className="flex justify-between text-xs font-semibold text-slate-400 dark:text-slate-500 mb-2">
-                            <span>0°C</span>
-                            <span className="text-slate-800 dark:text-slate-300">Ideal: 26-32°C</span>
-                            <span>40°C</span>
-                         </div>
-                         <div className="w-full bg-slate-200/50 dark:bg-slate-800 h-3 rounded-full overflow-hidden shadow-inner">
-                            <div className={`h-full rounded-full shadow-sm transition-all duration-1000 ease-out ${!isSystemOnline ? 'bg-slate-300 dark:bg-slate-600' : 'bg-gradient-to-r from-orange-400 to-rose-500'}`} style={{ width: `${(displayTemperature / 40) * 100}%` }}></div>
-                         </div>
+
                       </div>
                     </div>
+
                   </div>
                 </div>
 
-                {/* pH LEVEL TRENDS */}
-                <div className="bg-white dark:bg-slate-900 rounded-[2rem] p-8 shadow-sm border border-slate-100 dark:border-slate-800 hover:shadow-lg transition-shadow duration-300">
-                  <div className="flex flex-col md:flex-row md:items-start justify-between mb-8 gap-4">
-                    <div>
-                      <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 tracking-tight">
-                        {isTagalog ? "Trend ng pH Level" : "pH Level Trends"}
-                      </h3>
-                      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mt-1">
-                        {/* <p className="text-sm text-slate-400 font-medium">
-                          {isTagalog ? "Kasaysayan sa Nakalipas na 24 Oras" : "Last 24 Hours History"}
-                        </p> */}
-                        <div className="hidden sm:block text-slate-300 dark:text-slate-600">•</div>
-                        <div className="flex items-center gap-1 text-slate-400">
-                          <Clock size={12} />
-                          <span className="text-xs font-medium">{displayLastUpdated}</span>
+                {/* --- pH LEVEL TRENDS (FLIP OVER) --- */}
+                {/* FIXED: Changed from min-h to exact h-[480px] lg:h-[500px] so the white background doesn't collapse */}
+                <div className="relative h-[480px] lg:h-[500px] w-full perspective-1000 group">
+                  <div className={`relative w-full h-full transition-transform duration-700 transform-style-3d ${flipped.ph ? 'rotate-y-180' : ''}`}>
+                    
+                    {/* FRONT FACE */}
+                    <div className="absolute inset-0 backface-hidden bg-white dark:bg-slate-900 rounded-[2rem] p-6 lg:p-8 shadow-sm border border-slate-100 dark:border-slate-800 hover:shadow-lg transition-shadow duration-300 flex flex-col">
+                      
+                      {/* Info Button Overlay */}
+                      <button onClick={() => toggleFlip('ph')} className="absolute top-6 right-6 z-20 p-2 text-slate-400 hover:text-indigo-500 hover:bg-indigo-50 dark:hover:bg-indigo-500/10 rounded-full transition-colors">
+                        <Info size={24} />
+                      </button>
+
+                      <div className="flex flex-col sm:flex-row sm:items-start justify-between mb-6 gap-4 pr-10 lg:pr-12 shrink-0">
+                        <div>
+                          <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100 tracking-tight">
+                            {isTagalog ? "Trend ng pH Level" : "pH Level Trends"}
+                          </h3>
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-3 mt-1">
+                            <div className="hidden sm:block text-slate-300 dark:text-slate-600">•</div>
+                            <div className="flex items-center gap-1 text-slate-400">
+                              <Clock size={12} />
+                              <span className="text-xs font-medium">{displayLastUpdated}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center">
+                           <div className="flex flex-col sm:items-end sm:border-r border-slate-100 dark:border-slate-800 sm:pr-4">
+                             <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
+                               {isTagalog ? "Kasalukuyang pH" : "Current pH"}
+                             </span>
+                             <span className={`text-3xl font-black leading-none mt-1 ${!isSystemOnline ? 'text-slate-300 dark:text-slate-600' : 'text-indigo-600 dark:text-indigo-400'}`}>
+                               {displayPh.toFixed(1)}
+                             </span>
+                             <span className="text-xs font-semibold text-slate-800 dark:text-slate-300 mt-2">
+                               Ideal: 6.5 - 8.5
+                             </span>
+                           </div>
                         </div>
                       </div>
+                      
+                      {/* Added relative min-h-0 and flex-1 so it dynamically fits inside the explicit 500px height */}
+                      <div className="flex-1 w-full relative min-h-0">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={displayPhHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#334155' : '#f1f5f9'} />
+                            <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }} dy={10} />
+                            <YAxis domain={[0, 14]} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }} label={{ value: 'pH Level', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
+                            <Tooltip 
+                              contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.1)', fontFamily: 'sans-serif', backgroundColor: isDarkMode ? '#1e293b' : '#fff' }} 
+                              itemStyle={{ color: isDarkMode ? '#f8fafc' : '#1e293b', fontWeight: 700 }} 
+                            />
+                            <Line 
+                              type="linear" 
+                              dataKey="value" 
+                              stroke={!isSystemOnline ? '#cbd5e1' : '#6366f1'} 
+                              strokeWidth={4} 
+                              dot={{ r: 4, fill: !isSystemOnline ? '#cbd5e1' : '#6366f1', strokeWidth: 2, stroke: isDarkMode ? '#0f172a' : '#fff' }} 
+                              activeDot={{ r: 6 }} 
+                              animationDuration={1500} 
+                            />
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                       <div className="flex flex-col items-end mr-4 border-r border-slate-100 dark:border-slate-800 pr-4">
-                         <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                           {isTagalog ? "Kasalukuyang pH" : "Current pH"}
-                         </span>
-                         <span className={`text-3xl font-black leading-none mt-1 ${!isSystemOnline ? 'text-slate-300 dark:text-slate-600' : 'text-indigo-600 dark:text-indigo-400'}`}>
-                           {displayPh.toFixed(1)}
-                         </span>
-                         <span className="text-xs font-semibold text-slate-800 dark:text-slate-300 mt-2">
-                           Ideal: 6.5 - 8.5
-                         </span>
-                       </div>
-                      <span className="px-4 py-1.5 bg-indigo-50 dark:bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 rounded-full text-xs font-bold uppercase tracking-wider">
-                        {isTagalog ? "Araw-araw" : "Daily"}
-                      </span>
+
+                    {/* BACK FACE */}
+                    <div className="absolute inset-0 backface-hidden rotate-y-180 bg-indigo-500 rounded-[2rem] p-6 lg:p-10 shadow-xl text-white flex flex-col justify-center items-center text-center overflow-y-auto scrollbar-thin scrollbar-thumb-white/20">
+                      <button onClick={() => toggleFlip('ph')} className="absolute top-6 right-6 z-20 p-2 text-white/70 hover:text-white bg-white/10 hover:bg-white/20 rounded-full transition-colors">
+                        <Info size={24} />
+                      </button>
+                      <Activity size={48} className="mb-4 lg:mb-6 opacity-80 shrink-0" />
+                      <h3 className="font-bold text-xl lg:text-2xl mb-3 shrink-0">{isTagalog ? "Alam mo ba?" : "Did you know?"}</h3>
+                      <p className="text-sm md:text-base lg:text-lg font-medium leading-relaxed opacity-90 max-w-2xl">
+                        {isTagalog 
+                          ? "May natural na 'slime coat' ang isda bilang proteksyon! Kapag masyadong acidic (pH < 6.5) o alkaline (pH > 8.5) ang tubig, nasusunog ang slime na ito pati na ang kanilang hasang."
+                          : "Fish wear a natural, invisible \"slime coat\" to protect themselves from parasites and diseases! If the water becomes too acidic (pH below 6.5) or too alkaline (pH above 8.5), it chemically burns away this protective slime and damages their delicate gills."}
+                      </p>
                     </div>
-                  </div>
-                  <div className="h-72 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={displayPhHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={isDarkMode ? '#334155' : '#f1f5f9'} />
-                        <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }} dy={10} />
-                        <YAxis domain={[0, 14]} axisLine={false} tickLine={false} tick={{ fill: '#94a3b8', fontSize: 12, fontWeight: 500 }} label={{ value: 'pH Level', angle: -90, position: 'insideLeft', fill: '#94a3b8', fontSize: 10, fontWeight: 700 }} />
-                        <Tooltip 
-                          contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 25px -5px rgb(0 0 0 / 0.1)', fontFamily: 'sans-serif', backgroundColor: isDarkMode ? '#1e293b' : '#fff' }} 
-                          itemStyle={{ color: isDarkMode ? '#f8fafc' : '#1e293b', fontWeight: 700 }} 
-                        />
-                        <Line 
-                          type="linear" 
-                          dataKey="value" 
-                          stroke={!isSystemOnline ? '#cbd5e1' : '#6366f1'} 
-                          strokeWidth={4} 
-                          dot={{ r: 4, fill: !isSystemOnline ? '#cbd5e1' : '#6366f1', strokeWidth: 2, stroke: isDarkMode ? '#0f172a' : '#fff' }} 
-                          activeDot={{ r: 6 }} 
-                          animationDuration={1500} 
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
+
                   </div>
                 </div>
+
               </>
             )}
 
@@ -1014,43 +1070,6 @@ const App = () => {
                   </div>
                 </div>
 
-                {/* PUSH NOTIFICATION CARD */}
-                <div className={`
-                  bg-white dark:bg-slate-900 rounded-[2rem] p-6 lg:p-8 shadow-sm border transition-all duration-300
-                  ${pushEnabled ? 'border-sky-500 shadow-sky-100 dark:shadow-none' : 'border-slate-100 dark:border-slate-800'}
-                `}>
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
-                    <div className="flex gap-5 items-start">
-                      <div className={`p-4 rounded-2xl shrink-0 transition-colors duration-300 ${pushEnabled ? 'bg-sky-50 dark:bg-sky-500/10 text-sky-600 dark:text-sky-400' : 'bg-slate-50 dark:bg-slate-800 text-slate-400'}`}>
-                        <Smartphone size={28} />
-                      </div>
-                      <div>
-                        <h3 className="text-xl font-bold text-slate-800 dark:text-slate-100">Push Notifications</h3>
-                        <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed max-w-md mt-2">
-                          Makatanggap ng notifications sa smartphone o laptop kung kayo ay online.
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <div className="flex justify-end w-full sm:w-auto">
-                      <button 
-                        onClick={handlePushToggle}
-                        className={`
-                          w-14 h-8 rounded-full relative transition-colors duration-300 focus:outline-none shrink-0
-                          ${pushEnabled ? 'bg-sky-500' : 'bg-slate-200 dark:bg-slate-700'}
-                        `}
-                      >
-                        <div className={`
-                          w-6 h-6 bg-white rounded-full absolute top-1 transition-transform duration-300 shadow-sm flex items-center justify-center
-                          ${pushEnabled ? 'translate-x-7' : 'translate-x-1'}
-                        `}>
-                           {pushEnabled && <Check size={12} className="text-sky-500 stroke-[3]" />}
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
               </div>
             )}
 
@@ -1058,7 +1077,21 @@ const App = () => {
         </div>
       </main>
 
+      {/* --- CUSTOM CSS FOR 3D FLIP ANIMATIONS --- */}
       <style>{`
+        .perspective-1000 {
+          perspective: 1000px;
+        }
+        .transform-style-3d {
+          transform-style: preserve-3d;
+        }
+        .backface-hidden {
+          backface-visibility: hidden;
+          -webkit-backface-visibility: hidden;
+        }
+        .rotate-y-180 {
+          transform: rotateY(180deg);
+        }
         @keyframes float {
           0% { transform: translateY(0px); }
           50% { transform: translateY(-10px); }
@@ -1080,7 +1113,6 @@ const App = () => {
         ::-webkit-scrollbar-thumb:hover {
           background: #94a3b8;
         }
-        /* Custom dark mode scrollbar */
         .dark ::-webkit-scrollbar-thumb {
           background: #334155;
         }
