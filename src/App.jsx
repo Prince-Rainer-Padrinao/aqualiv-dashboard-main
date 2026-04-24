@@ -18,7 +18,8 @@ import {
   Clock,
   Moon,
   Globe,
-  Info
+  Info,
+  CalendarDays // Added for the History tab
 } from 'lucide-react';
 
 import { 
@@ -216,9 +217,22 @@ const App = () => {
   const [activeTab, setActiveTab] = useState('Dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   
-  // Toggles
-  const [isTagalog, setIsTagalog] = useState(false);
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  // Toggles (Now pulling from localStorage!)
+  const [isTagalog, setIsTagalog] = useState(() => {
+    return localStorage.getItem('aqualiv_tagalog') === 'true';
+  });
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    return localStorage.getItem('aqualiv_darkmode') === 'true';
+  });
+
+  // Save toggle changes to localStorage automatically
+  useEffect(() => {
+    localStorage.setItem('aqualiv_tagalog', isTagalog);
+  }, [isTagalog]);
+
+  useEffect(() => {
+    localStorage.setItem('aqualiv_darkmode', isDarkMode);
+  }, [isDarkMode]);
 
   // Card Flip States
   const [flipped, setFlipped] = useState({ salinity: false, temp: false, ph: false });
@@ -251,6 +265,10 @@ const App = () => {
   const [rawHistoryData, setRawHistoryData] = useState([]);
   const [rawPhHistoryData, setRawPhHistoryData] = useState([]);
   const [rawLastUpdated, setRawLastUpdated] = useState('');
+
+  // History Tab Data
+  const [dailyHistory, setDailyHistory] = useState([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
 
   // DISPLAY Sensor Data
   const displaySalinity = isSystemOnline ? rawSalinity : 0;
@@ -370,6 +388,19 @@ const App = () => {
       };
     }
 
+    // CHECK FOR -127 TEMPERATURE ERROR
+    if (temp <= -100) {
+      return {
+        title: tagalog ? 'Error sa Sensor' : 'Sensor Error',
+        message: tagalog ? 'SIRA ANG TEMP SENSOR' : 'TEMP SENSOR ERROR',
+        sub: tagalog
+          ? "Pakisuri ang wiring ng temperature sensor (Error -127)."
+          : "Please check the temperature sensor wiring (Error -127).",
+        color: 'from-slate-400 via-slate-500 to-slate-600',
+        icon: <AlertTriangle size={90} className="mb-6 drop-shadow-lg opacity-90 text-white" />
+      };
+    }
+
     if (sal > 10000 || temp > 35 || ph < 5.5 || ph > 9.0) {
       return {
         message: tagalog ? 'MATAAS NA ANTAS NG ALAT' : 'Extreme Condition',
@@ -405,6 +436,7 @@ const App = () => {
 
   const status = getWaterInterpretation(displaySalinity, displayTemperature, displayPh, isTagalog, isSystemOnline);
 
+  // FETCH LIVE DATA
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -457,6 +489,7 @@ const App = () => {
     return () => clearInterval(fetchInterval);
   }, [isAuthenticated, hasWaterLeak]);
 
+  // HEARTBEAT
   useEffect(() => {
     if (!isAuthenticated) return;
 
@@ -472,6 +505,84 @@ const App = () => {
 
     return () => clearInterval(heartbeatInterval);
   }, [isAuthenticated, lastReadingTime]);
+
+
+  // FETCH HISTORY LOGIC
+  useEffect(() => {
+    if (isAuthenticated && activeTab === 'History') {
+      const fetchHistory = async () => {
+        setIsLoadingHistory(true);
+        
+        // Grab data from the last 5 days
+        const fiveDaysAgo = new Date();
+        fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+
+        // We use a high limit just to make sure we grab all dots for averages
+        const { data, error } = await supabase
+          .from('readings')
+          .select('temperature, salinity, ph, created_at')
+          .gte('created_at', fiveDaysAgo.toISOString())
+          .order('created_at', { ascending: false })
+          .limit(5000); 
+
+        if (data && !error) {
+          const groupedData = {};
+
+          data.forEach(row => {
+            const dateObj = new Date(row.created_at);
+            const dateKey = dateObj.toLocaleDateString();
+
+            if (!groupedData[dateKey]) {
+              groupedData[dateKey] = {
+                date: dateKey,
+                fullDate: dateObj,
+                temps: [],
+                sals: [],
+                phs: [],
+                timestamps: []
+              };
+            }
+
+            // Filter out the -127 errors so they don't mess up our averages
+            if (row.temperature > -100) {
+              groupedData[dateKey].temps.push(row.temperature);
+            }
+            if (row.salinity !== null) groupedData[dateKey].sals.push(row.salinity);
+            if (row.ph !== null) groupedData[dateKey].phs.push(row.ph);
+            
+            groupedData[dateKey].timestamps.push(dateObj.getTime());
+          });
+
+          // Crunch the numbers for the UI
+          const processedHistory = Object.values(groupedData).map(day => {
+            const avgTemp = day.temps.length ? (day.temps.reduce((a,b)=>a+b,0)/day.temps.length).toFixed(1) : 'N/A';
+            const avgSal = day.sals.length ? (day.sals.reduce((a,b)=>a+b,0)/day.sals.length).toFixed(0) : 0;
+            const avgPh = day.phs.length ? (day.phs.reduce((a,b)=>a+b,0)/day.phs.length).toFixed(1) : 0;
+            
+            const minTime = Math.min(...day.timestamps);
+            const maxTime = Math.max(...day.timestamps);
+            
+            return {
+              displayDate: day.fullDate.toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }),
+              startTime: new Date(minTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              endTime: new Date(maxTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+              avgTemp, 
+              avgSal, 
+              avgPh,
+              rawSortDate: minTime
+            };
+          });
+
+          // Sort so the newest day is at the top
+          processedHistory.sort((a,b) => b.rawSortDate - a.rawSortDate);
+          setDailyHistory(processedHistory);
+        }
+        setIsLoadingHistory(false);
+      };
+
+      fetchHistory();
+    }
+  }, [activeTab, isAuthenticated]);
 
 
   if (!isAuthenticated) {
@@ -625,6 +736,13 @@ const App = () => {
             active={activeTab === 'Dashboard'} 
             onClick={() => { setActiveTab('Dashboard'); setSidebarOpen(false); }}
           />
+          {/* ADDED HISTORY TAB HERE */}
+          <SidebarItem 
+            icon={<CalendarDays size={20} />} 
+            label="History" 
+            active={activeTab === 'History'} 
+            onClick={() => { setActiveTab('History'); setSidebarOpen(false); }}
+          />
           <SidebarItem 
             icon={<Bell size={20} />} 
             label="Alerts" 
@@ -746,7 +864,6 @@ const App = () => {
                   <div className="lg:col-span-7 grid grid-cols-1 md:grid-cols-2 gap-6">
                     
                     {/* --- SALINITY CARD (FLIP OVER) --- */}
-                    {/* FIXED: Changed to strict h-[320px] */}
                     <div className="relative h-[320px] w-full perspective-1000 group">
                       <div className={`relative w-full h-full transition-transform duration-700 transform-style-3d ${flipped.salinity ? 'rotate-y-180' : ''}`}>
                         
@@ -814,7 +931,6 @@ const App = () => {
                     </div>
 
                     {/* --- TEMPERATURE CARD (FLIP OVER) --- */}
-                    {/* FIXED: Changed to strict h-[320px] */}
                     <div className="relative h-[320px] w-full perspective-1000 group">
                       <div className={`relative w-full h-full transition-transform duration-700 transform-style-3d ${flipped.temp ? 'rotate-y-180' : ''}`}>
                         
@@ -832,9 +948,11 @@ const App = () => {
                               <p className="text-slate-500 dark:text-slate-400 font-semibold text-xs uppercase tracking-wider">Water Temperature</p>
                               <div className="flex items-baseline mt-2">
                                 <h3 className={`text-5xl font-black tracking-tight ${!isSystemOnline ? 'text-slate-300 dark:text-slate-600' : 'text-slate-800 dark:text-slate-100'}`}>
-                                  {displayTemperature.toFixed(2)}
+                                  {displayTemperature <= -100 ? 'N/A' : displayTemperature.toFixed(2)}
                                 </h3>
-                                <span className="text-lg text-slate-400 font-semibold ml-1">°C</span>
+                                <span className="text-lg text-slate-400 font-semibold ml-1">
+                                  {displayTemperature <= -100 ? '' : '°C'}
+                                </span>
                               </div>
                                <div className="flex items-center gap-1 mt-1 text-slate-400">
                                 <Clock size={12} />
@@ -850,7 +968,7 @@ const App = () => {
                                 <span>40°C</span>
                              </div>
                              <div className="w-full bg-slate-200/50 dark:bg-slate-800 h-3 rounded-full overflow-hidden shadow-inner">
-                                <div className={`h-full rounded-full shadow-sm transition-all duration-1000 ease-out ${!isSystemOnline ? 'bg-slate-300 dark:bg-slate-600' : 'bg-gradient-to-r from-orange-400 to-rose-500'}`} style={{ width: `${(displayTemperature / 40) * 100}%` }}></div>
+                                <div className={`h-full rounded-full shadow-sm transition-all duration-1000 ease-out ${!isSystemOnline || displayTemperature <= -100 ? 'bg-slate-300 dark:bg-slate-600' : 'bg-gradient-to-r from-orange-400 to-rose-500'}`} style={{ width: `${displayTemperature <= -100 ? 0 : (displayTemperature / 40) * 100}%` }}></div>
                              </div>
                           </div>
                         </div>
@@ -876,7 +994,6 @@ const App = () => {
                 </div>
 
                 {/* --- pH LEVEL TRENDS (FLIP OVER) --- */}
-                {/* FIXED: Changed from min-h to exact h-[480px] lg:h-[500px] so the white background doesn't collapse */}
                 <div className="relative h-[480px] lg:h-[500px] w-full perspective-1000 group">
                   <div className={`relative w-full h-full transition-transform duration-700 transform-style-3d ${flipped.ph ? 'rotate-y-180' : ''}`}>
                     
@@ -916,7 +1033,6 @@ const App = () => {
                         </div>
                       </div>
                       
-                      {/* Added relative min-h-0 and flex-1 so it dynamically fits inside the explicit 500px height */}
                       <div className="flex-1 w-full relative min-h-0">
                         <ResponsiveContainer width="100%" height="100%">
                           <LineChart data={displayPhHistoryData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
@@ -959,6 +1075,77 @@ const App = () => {
                 </div>
 
               </>
+            )}
+
+            {/* --- NEW HISTORY TAB UI --- */}
+            {activeTab === 'History' && (
+              <div className="max-w-4xl mx-auto space-y-6 pb-20 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="mb-8">
+                  <h1 className="text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tight flex items-center gap-3">
+                    <CalendarDays size={32} className="text-sky-500" />
+                    {isTagalog ? "Kasaysayan ng Sistema" : "System History"}
+                  </h1>
+                  <p className="text-slate-500 dark:text-slate-400 mt-2">
+                    {isTagalog ? "Mga datos mula sa huling 5 araw." : "Daily summary from the past 5 days of usage."}
+                  </p>
+                </div>
+
+                {isLoadingHistory ? (
+                  <div className="flex justify-center py-20">
+                    <Activity className="animate-spin text-sky-500" size={32} />
+                  </div>
+                ) : dailyHistory.length === 0 ? (
+                  <div className="text-center py-20 text-slate-500 dark:text-slate-400">
+                    {isTagalog ? "Walang nakitang data." : "No history found for the past 5 days."}
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {dailyHistory.map((day, index) => (
+                      <div key={index} className="bg-white dark:bg-slate-900 rounded-[2rem] p-6 sm:p-8 shadow-sm border border-slate-100 dark:border-slate-800 hover:shadow-md transition-shadow">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 dark:border-slate-800 pb-4 mb-4 gap-4">
+                          <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">
+                            {day.displayDate}
+                          </h2>
+                          <div className="flex flex-wrap gap-3">
+                            <span className="px-3 py-1 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 text-xs font-bold rounded-lg border border-emerald-100 dark:border-emerald-800/50">
+                              Started: {day.startTime}
+                            </span>
+                            <span className="px-3 py-1 bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 text-xs font-bold rounded-lg border border-rose-100 dark:border-rose-800/50">
+                              Ended: {day.endTime}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl flex items-center gap-4">
+                            <Thermometer className="text-rose-500" size={24} />
+                            <div>
+                              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Avg Temp</p>
+                              <p className="text-lg font-black text-slate-800 dark:text-slate-100">{day.avgTemp} °C</p>
+                            </div>
+                          </div>
+                          
+                          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl flex items-center gap-4">
+                            <Droplets className="text-sky-500" size={24} />
+                            <div>
+                              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Avg Salinity</p>
+                              <p className="text-lg font-black text-slate-800 dark:text-slate-100">{day.avgSal} ppm</p>
+                            </div>
+                          </div>
+
+                          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl flex items-center gap-4">
+                            <Activity className="text-indigo-500" size={24} />
+                            <div>
+                              <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Avg pH</p>
+                              <p className="text-lg font-black text-slate-800 dark:text-slate-100">{day.avgPh}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
 
             {activeTab === 'Alerts' && (
