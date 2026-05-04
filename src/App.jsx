@@ -1180,7 +1180,7 @@ const App = () => {
                             )}
                           </div>
                           <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed max-w-md">
-                            Para sa mga gumagamit ng <strong>keypad phone</strong>. Makakatanggap kayo ng text message gamit ang aming 4G module kapag tumaas ang salt content.
+                            Para sa mga gumagamit ng <strong>keypad phone</strong>. Makakatanggap kayo ng text message sa pamamagitan ng aming online system kapag tumaas ang antas ng alat
                           </p>
                         </div>
                       </div>
