@@ -19,7 +19,7 @@ import {
   Moon,
   Globe,
   Info,
-  CalendarDays // Added for the History tab
+  CalendarDays
 } from 'lucide-react';
 
 import { 
@@ -33,6 +33,8 @@ import {
   Tooltip, 
   ResponsiveContainer 
 } from 'recharts';
+
+import ReCAPTCHA from 'react-google-recaptcha'; // <-- Added Import
 
 // --- REAL SUPABASE CONNECTION ---
 import { supabase } from './supabaseClient'; 
@@ -48,10 +50,19 @@ const LoginScreen = ({ onLogin }) => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  
+  // <-- Added State for reCAPTCHA
+  const [captchaValue, setCaptchaValue] = useState(null); 
 
   const handleLogin = async (e) => {
     e.preventDefault();
     setError('');
+
+    // <-- Added reCAPTCHA check
+    if (!captchaValue) {
+      setError('Please complete the reCAPTCHA to verify you are human.');
+      return;
+    }
 
     if (!username.trim() || !password.trim()) {
       setError('Please enter both username and password.');
@@ -76,6 +87,12 @@ const LoginScreen = ({ onLogin }) => {
     e.preventDefault();
     setError('');
 
+    // <-- Added reCAPTCHA check
+    if (!captchaValue) {
+      setError('Please complete the reCAPTCHA to verify you are human.');
+      return;
+    }
+
     if (!username.trim() || !password.trim()) {
       setError('Please fill in all fields.');
       return;
@@ -97,6 +114,8 @@ const LoginScreen = ({ onLogin }) => {
       setIsRegistering(false);
       setPassword('');
       setConfirmPassword('');
+      // Optional: reset captcha after successful registration
+      // setCaptchaValue(null); 
     }
   };
 
@@ -180,6 +199,14 @@ const LoginScreen = ({ onLogin }) => {
               <span>{successMsg}</span>
             </div>
           )}
+
+          {/* <-- Added reCAPTCHA Widget --> */}
+          <div className="flex justify-center mt-4 mb-2">
+            <ReCAPTCHA
+              sitekey="6Ld1NdwsAAAAAG-SlrVHT-v9u5auk73nWQlThEys"
+              onChange={(val) => setCaptchaValue(val)}
+            />
+          </div>
 
           <button 
             type="submit"
